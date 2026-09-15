@@ -6,6 +6,14 @@ import type { Note } from "@/lib/types";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
 
+function getStoredTheme(): "dark" | "light" {
+  try {
+    return (localStorage.getItem("excalidraw-theme") as "dark" | "light") || "dark";
+  } catch {
+    return "dark";
+  }
+}
+
 export default function Editor({
   note,
   onBack,
@@ -15,10 +23,10 @@ export default function Editor({
   onBack: () => void;
   onRename: (title: string) => void;
 }) {
-  const [ExcalidrawComp, setExcalidrawComp] = useState<React.ComponentType<
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    any
-  > | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [ExcalidrawComp, setExcalidrawComp] = useState<React.ComponentType<any> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [MainMenuComp, setMainMenuComp] = useState<any>(null);
   const excalidrawRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [saving, setSaving] = useState(false);
@@ -26,25 +34,29 @@ export default function Editor({
   const [title, setTitle] = useState(note.title);
   const initialDataRef = useRef<Record<string, unknown> | null>(null);
 
-  // Load Excalidraw dynamically (it uses window/document)
   useEffect(() => {
     import("@excalidraw/excalidraw").then((mod) => {
       setExcalidrawComp(() => mod.Excalidraw);
+      setMainMenuComp(() => mod.MainMenu);
     });
   }, []);
 
-  // Parse initial scene data
   useEffect(() => {
+    const theme = getStoredTheme();
     try {
       const parsed =
         typeof note.scene === "string" ? JSON.parse(note.scene) : note.scene;
       if (!parsed.appState) parsed.appState = {};
       parsed.appState.isLoading = false;
       parsed.appState.showWelcomeScreen = false;
+      parsed.appState.theme = parsed.appState.theme || theme;
       if (!parsed.elements) parsed.elements = [];
       initialDataRef.current = parsed;
     } catch {
-      initialDataRef.current = { elements: [], appState: { isLoading: false, showWelcomeScreen: false } };
+      initialDataRef.current = {
+        elements: [],
+        appState: { isLoading: false, showWelcomeScreen: false, theme },
+      };
     }
   }, [note.scene]);
 
@@ -54,6 +66,11 @@ export default function Editor({
     const elements = excalidrawRef.current.getSceneElements();
     const appState = excalidrawRef.current.getAppState();
     const files = excalidrawRef.current.getFiles();
+
+    try {
+      localStorage.setItem("excalidraw-theme", appState.theme);
+      document.documentElement.setAttribute("data-theme", appState.theme);
+    } catch {}
 
     const scene = JSON.stringify({
       elements,
@@ -77,7 +94,6 @@ export default function Editor({
     saveTimerRef.current = setTimeout(save, 2000);
   }, [save]);
 
-  // Save on unmount
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -92,7 +108,6 @@ export default function Editor({
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
-      {/* Toolbar */}
       <div
         className="flex items-center justify-between px-3 py-2 border-b shrink-0"
         style={{
@@ -138,9 +153,8 @@ export default function Editor({
         </span>
       </div>
 
-      {/* Excalidraw canvas */}
       <div style={{ flex: 1, position: "relative", overflow: "hidden", width: "100%", height: "100%" }}>
-        {ExcalidrawComp ? (
+        {ExcalidrawComp && MainMenuComp ? (
           <ExcalidrawComp
             ref={(api: ExcalidrawImperativeAPI) => {
               excalidrawRef.current = api;
@@ -154,7 +168,19 @@ export default function Editor({
                 saveToActiveFile: false,
               },
             }}
-          />
+          >
+            <MainMenuComp>
+              <MainMenuComp.DefaultItems.LoadScene />
+              <MainMenuComp.DefaultItems.SaveToActiveFile />
+              <MainMenuComp.DefaultItems.Export />
+              <MainMenuComp.DefaultItems.SaveAsImage />
+              <MainMenuComp.DefaultItems.SearchMenu />
+              <MainMenuComp.DefaultItems.Help />
+              <MainMenuComp.DefaultItems.ClearCanvas />
+              <MainMenuComp.DefaultItems.ToggleTheme />
+              <MainMenuComp.DefaultItems.ChangeCanvasBackground />
+            </MainMenuComp>
+          </ExcalidrawComp>
         ) : (
           <div className="flex items-center justify-center h-full">
             <div

@@ -1,10 +1,17 @@
 "use client";
 
+import { useEffect } from "react";
 import AuthProvider, { useAuth } from "@/components/AuthProvider";
 import LoginPage from "@/components/LoginPage";
 import Dashboard from "@/components/Dashboard";
 
 function AppContent() {
+  useEffect(() => {
+    try {
+      const theme = localStorage.getItem("excalidraw-theme") || "dark";
+      document.documentElement.setAttribute("data-theme", theme);
+    } catch {}
+  }, []);
   const { user, loading } = useAuth();
 
   if (loading) {
