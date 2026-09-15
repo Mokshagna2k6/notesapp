@@ -117,11 +117,14 @@ export default function Dashboard() {
     return (
       <Editor
         note={note}
+        allNotes={notes}
+        folders={folders}
         onBack={() => {
           fetchAll();
           setActiveNoteId(null);
         }}
         onRename={(title) => renameNote(note.id, title)}
+        onSwitchNote={(id) => setActiveNoteId(id)}
       />
     );
   }
