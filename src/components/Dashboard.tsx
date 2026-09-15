@@ -11,7 +11,7 @@ export default function Dashboard() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
-  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -40,7 +40,7 @@ export default function Dashboard() {
     fetchAll();
   }, [fetchAll]);
 
-  const createNote = async (folderId: string | null = activeFolderId) => {
+  const createNote = async () => {
     if (!user) return;
     const { data } = await getSupabase()
       .from("notes")
@@ -48,7 +48,7 @@ export default function Dashboard() {
         user_id: user.id,
         title: "Untitled",
         scene: "{}",
-        folder_id: folderId,
+        folder_id: openFolderId,
       })
       .select()
       .single();
@@ -70,7 +70,10 @@ export default function Dashboard() {
   };
 
   const moveNote = async (noteId: string, folderId: string | null) => {
-    await getSupabase().from("notes").update({ folder_id: folderId }).eq("id", noteId);
+    await getSupabase()
+      .from("notes")
+      .update({ folder_id: folderId })
+      .eq("id", noteId);
     setNotes((prev) =>
       prev.map((n) => (n.id === noteId ? { ...n, folder_id: folderId } : n))
     );
@@ -96,13 +99,16 @@ export default function Dashboard() {
   };
 
   const deleteFolder = async (id: string) => {
-    await getSupabase().from("notes").update({ folder_id: null }).eq("folder_id", id);
+    await getSupabase()
+      .from("notes")
+      .update({ folder_id: null })
+      .eq("folder_id", id);
     await getSupabase().from("folders").delete().eq("id", id);
     setFolders((prev) => prev.filter((f) => f.id !== id));
     setNotes((prev) =>
       prev.map((n) => (n.folder_id === id ? { ...n, folder_id: null } : n))
     );
-    if (activeFolderId === id) setActiveFolderId(null);
+    if (openFolderId === id) setOpenFolderId(null);
   };
 
   if (activeNoteId) {
@@ -120,18 +126,17 @@ export default function Dashboard() {
     );
   }
 
-  const visibleNotes = notes.filter((n) => {
-    const matchesFolder =
-      activeFolderId === null
-        ? true
-        : activeFolderId === "unfiled"
-          ? !n.folder_id
-          : n.folder_id === activeFolderId;
-    const matchesSearch = n.title.toLowerCase().includes(search.toLowerCase());
-    return matchesFolder && matchesSearch;
-  });
+  const currentFolderNotes = openFolderId
+    ? notes.filter((n) => n.folder_id === openFolderId)
+    : notes.filter((n) => !n.folder_id);
 
-  const unfolderedCount = notes.filter((n) => !n.folder_id).length;
+  const filteredNotes = search
+    ? notes.filter((n) =>
+        n.title.toLowerCase().includes(search.toLowerCase())
+      )
+    : currentFolderNotes;
+
+  const currentFolder = folders.find((f) => f.id === openFolderId);
 
   return (
     <div className="min-h-screen" style={{ background: "var(--background)" }}>
@@ -165,10 +170,17 @@ export default function Dashboard() {
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-6">
+        {/* Search + New */}
         <div className="flex items-center gap-3 mb-4">
           <input
             type="text"
-            placeholder="Search notes..."
+            placeholder={
+              search
+                ? "Search all notes..."
+                : openFolderId
+                  ? `Search in ${currentFolder?.name}...`
+                  : "Search all notes..."
+            }
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 px-4 py-2.5 rounded-lg text-sm outline-none"
@@ -179,86 +191,44 @@ export default function Dashboard() {
             }}
           />
           <button
-            onClick={() => createNote()}
+            onClick={createNote}
             className="px-4 py-2.5 rounded-lg text-sm font-medium text-white cursor-pointer whitespace-nowrap"
             style={{ background: "var(--accent)" }}
           >
-            + New
+            + New Note
           </button>
         </div>
 
-        {/* Folder bar */}
-        <div className="flex items-center gap-2 mb-6 flex-wrap">
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-2 mb-5">
           <button
-            onClick={() => setActiveFolderId(null)}
-            className="px-3 py-1.5 rounded-lg text-xs cursor-pointer border-none"
+            onClick={() => {
+              setOpenFolderId(null);
+              setSearch("");
+            }}
+            className="text-sm cursor-pointer bg-transparent border-none"
             style={{
-              background: activeFolderId === null ? "var(--accent)" : "var(--card)",
-              color: activeFolderId === null ? "#fff" : "var(--foreground)",
-              border: `1px solid ${activeFolderId === null ? "var(--accent)" : "var(--border)"}`,
+              color: openFolderId ? "var(--accent)" : "var(--foreground)",
+              fontWeight: openFolderId ? 400 : 600,
             }}
           >
-            All ({notes.length})
+            My Notes
           </button>
-          <button
-            onClick={() => setActiveFolderId("unfiled")}
-            className="px-3 py-1.5 rounded-lg text-xs cursor-pointer border-none"
-            style={{
-              background: activeFolderId === "unfiled" ? "var(--accent)" : "var(--card)",
-              color: activeFolderId === "unfiled" ? "#fff" : "var(--foreground)",
-              border: `1px solid ${activeFolderId === "unfiled" ? "var(--accent)" : "var(--border)"}`,
-            }}
-          >
-            Unfiled ({unfolderedCount})
-          </button>
-          {folders.map((f) => (
-            <FolderChip
-              key={f.id}
-              folder={f}
-              active={activeFolderId === f.id}
-              count={notes.filter((n) => n.folder_id === f.id).length}
-              onClick={() => setActiveFolderId(f.id)}
-              onRename={(name) => renameFolder(f.id, name)}
-              onDelete={() => deleteFolder(f.id)}
-            />
-          ))}
-          {creatingFolder ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                createFolder();
-              }}
-              className="flex items-center gap-1"
-            >
-              <input
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                placeholder="Folder name"
-                autoFocus
-                onBlur={() => {
-                  if (!newFolderName.trim()) setCreatingFolder(false);
-                }}
-                className="px-2 py-1 rounded text-xs outline-none"
-                style={{
-                  background: "var(--card)",
-                  border: "1px solid var(--accent)",
-                  color: "var(--foreground)",
-                  width: 120,
-                }}
-              />
-            </form>
-          ) : (
-            <button
-              onClick={() => setCreatingFolder(true)}
-              className="px-3 py-1.5 rounded-lg text-xs cursor-pointer"
-              style={{
-                background: "transparent",
-                border: "1px dashed var(--border)",
-                color: "var(--muted)",
-              }}
-            >
-              + Folder
-            </button>
+          {currentFolder && (
+            <>
+              <span style={{ color: "var(--muted)" }}>/</span>
+              <span className="text-sm font-semibold">
+                {currentFolder.name}
+              </span>
+            </>
+          )}
+          {search && (
+            <>
+              <span style={{ color: "var(--muted)" }}>/</span>
+              <span className="text-sm" style={{ color: "var(--muted)" }}>
+                Search: &quot;{search}&quot;
+              </span>
+            </>
           )}
         </div>
 
@@ -269,45 +239,145 @@ export default function Dashboard() {
               style={{ borderColor: "var(--accent)" }}
             />
           </div>
-        ) : visibleNotes.length === 0 ? (
-          <div className="text-center py-20" style={{ color: "var(--muted)" }}>
-            {notes.length === 0
-              ? 'No notes yet. Click "+ New" to create one.'
-              : activeFolderId && !search
-                ? "This folder is empty."
-                : "No matching notes."}
-          </div>
         ) : (
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
-            {visibleNotes.map((note) => (
-              <NoteCard
-                key={note.id}
-                note={note}
-                folders={folders}
-                onClick={() => setActiveNoteId(note.id)}
-                onDelete={() => deleteNote(note.id)}
-                onRename={(title) => renameNote(note.id, title)}
-                onMove={(folderId) => moveNote(note.id, folderId)}
-              />
-            ))}
-          </div>
+          <>
+            {/* Folders section — only show at root level, not when searching */}
+            {!openFolderId && !search && (
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h2
+                    className="text-xs font-semibold uppercase tracking-wider"
+                    style={{ color: "var(--muted)" }}
+                  >
+                    Folders
+                  </h2>
+                </div>
+                <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4">
+                  {folders.map((folder) => (
+                    <FolderCard
+                      key={folder.id}
+                      folder={folder}
+                      noteCount={
+                        notes.filter((n) => n.folder_id === folder.id).length
+                      }
+                      onClick={() => setOpenFolderId(folder.id)}
+                      onRename={(name) => renameFolder(folder.id, name)}
+                      onDelete={() => deleteFolder(folder.id)}
+                    />
+                  ))}
+                  {/* Create folder card */}
+                  {creatingFolder ? (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        createFolder();
+                      }}
+                      className="rounded-xl p-4 flex flex-col items-center justify-center"
+                      style={{
+                        border: "2px dashed var(--accent)",
+                        background: "var(--card)",
+                        minHeight: 100,
+                      }}
+                    >
+                      <input
+                        value={newFolderName}
+                        onChange={(e) => setNewFolderName(e.target.value)}
+                        placeholder="Folder name..."
+                        autoFocus
+                        onBlur={() => {
+                          if (newFolderName.trim()) {
+                            createFolder();
+                          } else {
+                            setCreatingFolder(false);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setCreatingFolder(false);
+                        }}
+                        className="text-sm text-center bg-transparent border-none outline-none w-full"
+                        style={{ color: "var(--foreground)" }}
+                      />
+                    </form>
+                  ) : (
+                    <button
+                      onClick={() => setCreatingFolder(true)}
+                      className="rounded-xl p-4 flex flex-col items-center justify-center gap-2 cursor-pointer"
+                      style={{
+                        border: "2px dashed var(--border)",
+                        background: "transparent",
+                        minHeight: 100,
+                        color: "var(--muted)",
+                      }}
+                    >
+                      <span style={{ fontSize: 24 }}>+</span>
+                      <span className="text-xs">New Folder</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Notes section */}
+            <div>
+              <h2
+                className="text-xs font-semibold uppercase tracking-wider mb-3"
+                style={{ color: "var(--muted)" }}
+              >
+                {search
+                  ? `Search results (${filteredNotes.length})`
+                  : openFolderId
+                    ? `Notes in ${currentFolder?.name} (${filteredNotes.length})`
+                    : `Notes (${currentFolderNotes.length})`}
+              </h2>
+              {filteredNotes.length === 0 ? (
+                <div
+                  className="text-center py-16 rounded-xl"
+                  style={{
+                    color: "var(--muted)",
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <p className="text-sm">
+                    {search
+                      ? "No matching notes."
+                      : openFolderId
+                        ? "This folder is empty. Create a note to get started."
+                        : 'No notes yet. Click "+ New Note" to create one.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+                  {filteredNotes.map((note) => (
+                    <NoteCard
+                      key={note.id}
+                      note={note}
+                      folders={folders}
+                      onClick={() => setActiveNoteId(note.id)}
+                      onDelete={() => deleteNote(note.id)}
+                      onRename={(t) => renameNote(note.id, t)}
+                      onMove={(fid) => moveNote(note.id, fid)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-function FolderChip({
+function FolderCard({
   folder,
-  active,
-  count,
+  noteCount,
   onClick,
   onRename,
   onDelete,
 }: {
   folder: Folder;
-  active: boolean;
-  count: number;
+  noteCount: number;
   onClick: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
@@ -317,59 +387,71 @@ function FolderChip({
   const [showMenu, setShowMenu] = useState(false);
 
   return (
-    <div className="relative">
+    <div
+      role="button"
+      tabIndex={0}
+      className="rounded-xl p-4 cursor-pointer transition-colors relative"
+      style={{
+        background: "var(--card)",
+        border: "1px solid var(--border)",
+        minHeight: 100,
+      }}
+      onClick={onClick}
+      onMouseEnter={(e) =>
+        (e.currentTarget.style.background = "var(--card-hover)")
+      }
+      onMouseLeave={(e) =>
+        (e.currentTarget.style.background = "var(--card)")
+      }
+    >
+      {/* Folder icon */}
+      <div className="text-2xl mb-2" style={{ opacity: 0.7 }}>
+        &#128193;
+      </div>
+      {editing ? (
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => {
+            setEditing(false);
+            if (name.trim() && name !== folder.name) onRename(name.trim());
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+          onClick={(e) => e.stopPropagation()}
+          autoFocus
+          className="text-sm font-medium bg-transparent border-none outline-none w-full"
+          style={{ color: "var(--foreground)" }}
+        />
+      ) : (
+        <p className="text-sm font-medium truncate">{folder.name}</p>
+      )}
+      <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
+        {noteCount} {noteCount === 1 ? "note" : "notes"}
+      </p>
+
+      {/* Menu button */}
       <button
-        onClick={onClick}
-        onContextMenu={(e) => {
-          e.preventDefault();
+        onClick={(e) => {
+          e.stopPropagation();
           setShowMenu(!showMenu);
         }}
-        className="px-3 py-1.5 rounded-lg text-xs cursor-pointer border-none flex items-center gap-1"
-        style={{
-          background: active ? "var(--accent)" : "var(--card)",
-          color: active ? "#fff" : "var(--foreground)",
-          border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
-        }}
+        className="absolute top-2 right-2 text-xs px-2 py-1 rounded cursor-pointer bg-transparent border-none"
+        style={{ color: "var(--muted)" }}
       >
-        {editing ? (
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => {
-              setEditing(false);
-              if (name.trim() && name !== folder.name) onRename(name.trim());
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-            }}
-            onClick={(e) => e.stopPropagation()}
-            autoFocus
-            className="bg-transparent border-none outline-none text-xs"
-            style={{ color: "inherit", width: 80 }}
-          />
-        ) : (
-          <>
-            {folder.name} ({count})
-          </>
-        )}
-        <span
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowMenu(!showMenu);
-          }}
-          style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}
-        >
-          ...
-        </span>
+        ...
       </button>
+
       {showMenu && (
         <div
-          className="absolute top-full left-0 mt-1 rounded-lg shadow-lg py-1 z-20"
+          className="absolute top-8 right-2 rounded-lg shadow-lg py-1 z-20"
           style={{
             background: "var(--card)",
             border: "1px solid var(--border)",
             minWidth: 100,
           }}
+          onClick={(e) => e.stopPropagation()}
         >
           <button
             onClick={() => {
@@ -384,7 +466,7 @@ function FolderChip({
           <button
             onClick={() => {
               setShowMenu(false);
-              if (confirm("Delete folder? Notes will be moved to unfiled."))
+              if (confirm("Delete folder? Notes will move to My Notes."))
                 onDelete();
             }}
             className="block w-full text-left px-3 py-1.5 text-xs cursor-pointer bg-transparent border-none"
@@ -497,10 +579,12 @@ function NoteCard({
                   }}
                   className="block w-full text-left px-3 py-1.5 text-xs cursor-pointer bg-transparent border-none"
                   style={{
-                    color: !note.folder_id ? "var(--accent)" : "var(--foreground)",
+                    color: !note.folder_id
+                      ? "var(--accent)"
+                      : "var(--foreground)",
                   }}
                 >
-                  Unfiled
+                  My Notes (root)
                 </button>
                 {folders.map((f) => (
                   <button
@@ -517,7 +601,7 @@ function NoteCard({
                           : "var(--foreground)",
                     }}
                   >
-                    {f.name}
+                    &#128193; {f.name}
                   </button>
                 ))}
               </div>
@@ -548,7 +632,7 @@ function NoteCard({
               fontSize: 10,
             }}
           >
-            {folderName}
+            &#128193; {folderName}
           </span>
         )}
       </div>
